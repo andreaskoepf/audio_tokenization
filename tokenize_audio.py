@@ -16,17 +16,17 @@ from boson_multimodal.audio_processing.higgs_audio_tokenizer import (
 
 def load_audio_mono(
     uri: str | PathLike | BinaryIO, format: str | None = None, sample_rate: int = 24_000
-):
-    wav, sr = torchaudio.load(uri, format=format)
+) -> tuple[torch.Tensor, int]:
+    wav, original_sr = torchaudio.load(uri, format=format)
     if wav.ndim == 2 and wav.size(0) > 1:
         # convert to mono
         wav = wav.mean(dim=0, keepdim=True)
     elif wav.ndim == 1:
         wav = wav.unsqueeze(0)
-    if sr != sample_rate:
+    if original_sr != sample_rate:
         # resample to target sampling rate
-        wav = torchaudio.functional.resample(wav, sr, sample_rate)
-    return wav.squeeze(0).clamp(-1, 1).float()
+        wav = torchaudio.functional.resample(wav, original_sr, sample_rate)
+    return wav.squeeze(0).clamp(-1, 1).float(), original_sr
 
 
 def determine_token_audio_length(audio_tokenizer, num_tokens: int = 1) -> int:
@@ -162,9 +162,9 @@ class TokenEncoder:
 
     def encode_piecewise_file(
         self, uri: str | PathLike | BinaryIO, format: str | None = None
-    ) -> torch.Tensor:
-        x = load_audio_mono(uri, format=format)
-        return self.encode_piecewise(x)
+    ) -> tuple[torch.Tensor, int]:
+        x, original_sr = load_audio_mono(uri, format=format, sample_rate=self.sample_rate)
+        return self.encode_piecewise(x), original_sr
 
     def process_tar_file(self, fn: str | PathLike, output_jsonl: str | PathLike, extensions=(".mp3",)):
         """Process a tar file and write results to JSONL output.
@@ -225,11 +225,11 @@ class TokenEncoder:
                 file_obj = tar.extractfile(member)
                 if file_obj:
                     try:
-                        # Load audio to get sample count
-                        wav = load_audio_mono(file_obj, format="mp3", sample_rate=self.sample_rate)
+                        # Load audio to get sample count and original sampling rate
+                        wav, original_sr = load_audio_mono(file_obj, format="mp3", sample_rate=self.sample_rate)
                         num_samples = wav.shape[0]
 
-                        logging.info(f"Input {member.name}: {num_samples} samples")
+                        logging.info(f"Input {member.name}: {num_samples} samples (original SR: {original_sr} Hz)")
 
                         # Encode to tokens
                         tokens = self.encode_piecewise(wav)
@@ -242,6 +242,7 @@ class TokenEncoder:
                             "audio_file": member.name,
                             "num_samples": num_samples,
                             "sample_rate": self.sample_rate,
+                            "original_sample_rate": original_sr,
                             "tokens": tokens_list,
                             "token_shape": list(tokens.shape)
                         }
