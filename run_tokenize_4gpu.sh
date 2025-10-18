@@ -9,7 +9,7 @@
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --time=02:00:00
+#SBATCH --time=01:30:00
 #SBATCH --array=1-4
 
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
@@ -82,7 +82,8 @@ for i in "${!TAR_FILES[@]}"; do
 
     # Run tokenization in background for this GPU
     # Use --skip-existing to automatically skip already processed files
-    python tokenize_audio.py \
+    # Use the Python interpreter from the venv
+    HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python tokenize_audio.py \
         --model-path "$MODEL_PATH" \
         --input-tar "$TAR_FILE" \
         --output-dir "$OUTPUT_DIR" \

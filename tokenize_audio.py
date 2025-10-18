@@ -3,30 +3,74 @@ from pathlib import Path
 import tarfile
 from typing import BinaryIO
 import torch
-import torchaudio
 import argparse
 import json
 import logging
 import sys
 from datetime import datetime
+from torchcodec.decoders import AudioDecoder, AudioStreamMetadata
 from boson_multimodal.audio_processing.higgs_audio_tokenizer import (
     load_higgs_audio_tokenizer,
 )
 
 
+def audio_metadata_to_dict(metadata: AudioStreamMetadata) -> dict:
+    """
+    Convert AudioStreamMetadata to a dictionary.
+
+    Args:
+        metadata: AudioStreamMetadata object
+
+    Returns:
+        Dictionary with all metadata properties
+    """
+    return {
+        "sample_rate": metadata.sample_rate,
+        "num_channels": metadata.num_channels,
+        "duration_seconds_from_header": metadata.duration_seconds_from_header,
+        "begin_stream_seconds_from_header": metadata.begin_stream_seconds_from_header,
+        "bit_rate": metadata.bit_rate,
+        "codec": metadata.codec,
+        "stream_index": metadata.stream_index,
+        "sample_format": metadata.sample_format,
+    }
+
+
 def load_audio_mono(
-    uri: str | PathLike | BinaryIO, format: str | None = None, sample_rate: int = 24_000
-) -> tuple[torch.Tensor, int]:
-    wav, original_sr = torchaudio.load(uri, format=format)
-    if wav.ndim == 2 and wav.size(0) > 1:
-        # convert to mono
-        wav = wav.mean(dim=0, keepdim=True)
-    elif wav.ndim == 1:
-        wav = wav.unsqueeze(0)
-    if original_sr != sample_rate:
-        # resample to target sampling rate
-        wav = torchaudio.functional.resample(wav, original_sr, sample_rate)
-    return wav.squeeze(0).clamp(-1, 1).float(), original_sr
+    uri: str | PathLike | BinaryIO, sample_rate: int = 24_000
+) -> tuple[torch.Tensor, AudioStreamMetadata]:
+    """
+    Load audio file and convert to mono at the specified sample rate.
+
+    Args:
+        uri: Path to audio file or file-like object
+        sample_rate: Target sample rate for output
+
+    Returns:
+        Tuple of (audio_tensor, metadata)
+        - audio_tensor: 1D tensor with shape (num_samples,) containing normalized float audio in [-1, 1]
+        - metadata: AudioStreamMetadata object with original sample_rate, num_channels, etc.
+    """
+    # Create AudioDecoder with desired output sample rate and mono output
+    decoder = AudioDecoder(uri, sample_rate=sample_rate, num_channels=1)
+
+    # Get original metadata before decoding
+    metadata = decoder.metadata
+
+    # Decode all samples
+    audio_samples = decoder.get_all_samples()
+    wav = audio_samples.data  # shape: (num_channels, num_samples)
+
+    # Validate tensor dimensions
+    if wav.ndim not in (1, 2):
+        raise ValueError(f"Expected audio tensor to have 1 or 2 dimensions, but got {wav.ndim}")
+
+    # AudioDecoder with num_channels=1 should return mono, but ensure it's squeezed to 1D
+    if wav.ndim == 2:
+        wav = wav.squeeze(0)
+
+    # AudioDecoder already returns normalized float values in [-1, 1] range
+    return wav, metadata
 
 
 def determine_token_audio_length(audio_tokenizer, num_tokens: int = 1) -> int:
@@ -161,10 +205,10 @@ class TokenEncoder:
         return tokens_output
 
     def encode_piecewise_file(
-        self, uri: str | PathLike | BinaryIO, format: str | None = None
-    ) -> tuple[torch.Tensor, int]:
-        x, original_sr = load_audio_mono(uri, format=format, sample_rate=self.sample_rate)
-        return self.encode_piecewise(x), original_sr
+        self, uri: str | PathLike | BinaryIO
+    ) -> tuple[torch.Tensor, AudioStreamMetadata]:
+        x, metadata = load_audio_mono(uri, sample_rate=self.sample_rate)
+        return self.encode_piecewise(x), metadata
 
     def process_tar_file(self, fn: str | PathLike, output_jsonl: str | PathLike, extensions=(".mp3",)):
         """Process a tar file and write results to JSONL output.
@@ -225,11 +269,11 @@ class TokenEncoder:
                 file_obj = tar.extractfile(member)
                 if file_obj:
                     try:
-                        # Load audio to get sample count and original sampling rate
-                        wav, original_sr = load_audio_mono(file_obj, format="mp3", sample_rate=self.sample_rate)
+                        # Load audio and get metadata
+                        wav, metadata = load_audio_mono(file_obj, sample_rate=self.sample_rate)
                         num_samples = wav.shape[0]
 
-                        logging.info(f"Input {member.name}: {num_samples} samples (original SR: {original_sr} Hz)")
+                        logging.info(f"Input {member.name}: {num_samples} samples (original SR: {metadata.sample_rate} Hz, channels: {metadata.num_channels})")
 
                         # Encode to tokens
                         tokens = self.encode_piecewise(wav)
@@ -242,7 +286,7 @@ class TokenEncoder:
                             "audio_file": member.name,
                             "num_samples": num_samples,
                             "sample_rate": self.sample_rate,
-                            "original_sample_rate": original_sr,
+                            "original_metadata": audio_metadata_to_dict(metadata),
                             "tokens": tokens_list,
                             "token_shape": list(tokens.shape)
                         }
@@ -319,7 +363,7 @@ def parse_args():
     parser.add_argument(
         "--model-path",
         type=str,
-        required=True,
+        default="bosonai/higgs-audio-v2-tokenizer",
         help="Path to the audio tokenizer model (e.g., local path to bosonai/higgs-audio-v2-tokenizer)"
     )
 
