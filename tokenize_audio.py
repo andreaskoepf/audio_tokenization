@@ -37,14 +37,14 @@ def audio_metadata_to_dict(metadata: AudioStreamMetadata) -> dict:
 
 
 def load_audio_mono(
-    uri: str | PathLike | BinaryIO, sample_rate: int = 24_000
+    uri: str | PathLike | BinaryIO, sample_rate: int | None = None
 ) -> tuple[torch.Tensor, AudioStreamMetadata]:
     """
     Load audio file and convert to mono at the specified sample rate.
 
     Args:
         uri: Path to audio file or file-like object
-        sample_rate: Target sample rate for output
+        sample_rate: Target sample rate for output. If None, uses the original sample rate.
 
     Returns:
         Tuple of (audio_tensor, metadata)
