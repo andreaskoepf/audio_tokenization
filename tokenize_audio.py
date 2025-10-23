@@ -71,7 +71,7 @@ def load_audio_mono(
     
     # ensure dynamic range doesn't exceed [-1,1] range
     max_value = wav.abs().max()
-    if max_value > 1.0:
+    if max_value.item() > 1.0:
         wav = wav / max_value
 
     return wav, metadata
@@ -409,7 +409,7 @@ def parse_args():
     parser.add_argument(
         "--num-tokens-overlap",
         type=int,
-        default=50,  # 2 second overlap
+        default=250,  # 10 second overlap
         help="Number of tokens to overlap between fragments"
     )
 

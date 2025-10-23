@@ -146,7 +146,7 @@ def parse_args():
     parser.add_argument(
         "--num-tokens-overlap",
         type=int,
-        default=50,
+        default=250,
         help="Number of tokens to overlap between fragments"
     )
 
