@@ -68,6 +68,11 @@ def load_audio_mono(
     # AudioDecoder with num_channels=1 should return mono, but ensure it's squeezed to 1D
     if wav.ndim == 2:
         wav = wav.squeeze(0)
+    
+    # reduce dynamic range if abs-vaules exceeds 1.0 (apparently torchcodec doesn't always return normalized data)
+    max_value = wav.abs().max()
+    if max_value > 1.0:
+        wav = wav / max_value
 
     # AudioDecoder already returns normalized float values in [-1, 1] range
     return wav, metadata
