@@ -10,7 +10,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
 #SBATCH --time=01:30:00
-#SBATCH --array=1-4
+#SBATCH --array=0-3
 
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
@@ -46,8 +46,9 @@ mkdir -p logs
 
 # Calculate which tar files this array task should process
 # Each array task processes 4 tar files (one per GPU)
-START_IDX=$(( (SLURM_ARRAY_TASK_ID - 1) * 4 + 1 ))
-END_IDX=$(( SLURM_ARRAY_TASK_ID * 4 ))
+# Array IDs start at 0: ID 0 -> lines 1-4, ID 1 -> lines 5-8, etc.
+START_IDX=$(( SLURM_ARRAY_TASK_ID * 4 + 1 ))
+END_IDX=$(( (SLURM_ARRAY_TASK_ID + 1) * 4 ))
 
 echo "=========================================="
 echo "SLURM Array Task ID: $SLURM_ARRAY_TASK_ID"
