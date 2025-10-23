@@ -51,8 +51,8 @@ def load_audio_mono(
         - audio_tensor: 1D tensor with shape (num_samples,) containing normalized float audio in [-1, 1]
         - metadata: AudioStreamMetadata object with original sample_rate, num_channels, etc.
     """
-    # Create AudioDecoder with desired output sample rate and mono output
-    decoder = AudioDecoder(uri, sample_rate=sample_rate, num_channels=1)
+    # Create AudioDecoder with desired output sample rate
+    decoder = AudioDecoder(uri, sample_rate=sample_rate)
 
     # Get original metadata before decoding
     metadata = decoder.metadata
@@ -64,12 +64,12 @@ def load_audio_mono(
     # Validate tensor dimensions
     if wav.ndim not in (1, 2):
         raise ValueError(f"Expected audio tensor to have 1 or 2 dimensions, but got {wav.ndim}")
-
-    # AudioDecoder with num_channels=1 should return mono, but ensure it's squeezed to 1D
-    if wav.ndim == 2:
-        wav = wav.squeeze(0)
     
-    # reduce dynamic range if abs-vaules exceeds 1.0 (torchcodec doesn't always return normalized data even docs say so)
+    # convert to mono output
+    if wav.ndim == 2:
+        wav = wav.mean(dim=0)
+    
+    # ensure dynamic range doesn't exceed [-1,1] range
     max_value = wav.abs().max()
     if max_value > 1.0:
         wav = wav / max_value
