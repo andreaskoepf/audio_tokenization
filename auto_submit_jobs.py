@@ -252,7 +252,7 @@ def load_state(state_file: Path) -> Set[str]:
         return set()
 
 
-def cleanup_old_temp_files(directory: Path, pattern: str = ".*.*.tmp", max_age_hours: int = 24):
+def cleanup_old_temp_files(directory: Path, pattern: str = ".*.*.tmp", max_age_hours: int = 168):
     """Clean up old temporary tarlist files.
 
     Args:
@@ -445,9 +445,9 @@ def main():
         logging.info(f"Iteration {iteration}")
         logging.info(f"{'=' * 80}")
 
-        # Clean up old temporary tarlist files (older than 24 hours)
-        if iteration % 10 == 1:  # Check every 10 iterations to avoid overhead
-            cleanup_old_temp_files(tarlist_path.parent, pattern=f".{tarlist_path.stem}.*.tmp")
+        # # Clean up old temporary tarlist files (older than 24 hours)
+        # if iteration % 10 == 1:  # Check every 10 iterations to avoid overhead
+        #     cleanup_old_temp_files(tarlist_path.parent, pattern=f".{tarlist_path.stem}.*.tmp")
 
         # Get current job count
         num_jobs = get_num_jobs(username)
