@@ -278,6 +278,132 @@ def cleanup_old_temp_files(directory: Path, pattern: str = ".*.*.tmp", max_age_h
             logging.debug(f"Failed to clean up {temp_file}: {e}")
 
 
+def cleanup_failed_jobs(output_dir: Path, submitted_tars: Set[str], all_tars: List[str]) -> Set[str]:
+    """Identify and remove failed jobs from submitted_tars set.
+
+    This function identifies failed jobs by:
+    1. Finding 0-byte .jsonl files in the output directory
+    2. Finding submitted tars that have no output file at all (.jsonl or .jsonl.partial)
+
+    Args:
+        output_dir: Output directory containing .jsonl files
+        submitted_tars: Set of tar file paths that have been submitted
+        all_tars: List of all tar file paths
+
+    Returns:
+        Updated submitted_tars set with failed jobs removed
+    """
+    if not output_dir.exists():
+        logging.warning(f"Output directory does not exist: {output_dir}")
+        return submitted_tars
+
+    # Create a mapping from tar basename to tar path for quick lookup
+    basename_to_path = {}
+    for tar_path in all_tars:
+        basename = get_tar_basename(tar_path)
+        basename_to_path[basename] = tar_path
+
+    failed_tars = set()
+
+    # Build a set of all basenames that have ANY output file (.jsonl or .jsonl.partial)
+    output_basenames = set()
+
+    # Collect all .jsonl files (including those with size > 0)
+    for jsonl_file in output_dir.glob("*.jsonl"):
+        output_basenames.add(jsonl_file.stem)
+
+    # Collect all .jsonl.partial files
+    for partial_file in output_dir.glob("*.jsonl.partial"):
+        # Extract the tar basename (remove .jsonl.partial)
+        tar_basename = partial_file.name.replace('.jsonl.partial', '')
+        output_basenames.add(tar_basename)
+
+    # Find 0-byte .jsonl files
+    for jsonl_file in output_dir.glob("*.jsonl"):
+        # Check if file is 0 bytes
+        if jsonl_file.stat().st_size == 0:
+            tar_basename = jsonl_file.stem
+            if tar_basename in basename_to_path:
+                tar_path = basename_to_path[tar_basename]
+                if tar_path in submitted_tars:
+                    failed_tars.add(tar_path)
+                    logging.info(f"Found 0-byte output: {jsonl_file.name} -> will retry {tar_basename}")
+                    # Delete the 0-byte file
+                    try:
+                        jsonl_file.unlink()
+                        logging.info(f"Deleted 0-byte file: {jsonl_file}")
+                    except Exception as e:
+                        logging.error(f"Failed to delete {jsonl_file}: {e}")
+
+    # Find submitted tars with no output at all
+    for tar_path in submitted_tars:
+        tar_basename = get_tar_basename(tar_path)
+        if tar_basename not in output_basenames:
+            failed_tars.add(tar_path)
+            logging.info(f"Found submitted tar with no output: {tar_basename} -> will retry")
+
+    # Remove failed tars from submitted set
+    updated_submitted = submitted_tars - failed_tars
+
+    num_removed = len(failed_tars)
+    if num_removed > 0:
+        logging.info(f"Removed {num_removed} failed jobs from submitted_tars")
+        logging.info(f"These jobs will be retried: {sorted([get_tar_basename(t) for t in failed_tars])}")
+    else:
+        logging.info("No failed jobs found")
+
+    return updated_submitted
+
+
+def retry_partial_jobs(output_dir: Path, submitted_tars: Set[str], all_tars: List[str]) -> Set[str]:
+    """Identify and remove partial jobs from submitted_tars set to retry them.
+
+    This function identifies partial jobs by finding .jsonl.partial files.
+    The partial files are NOT deleted as they can be continued from.
+
+    Args:
+        output_dir: Output directory containing .jsonl files
+        submitted_tars: Set of tar file paths that have been submitted
+        all_tars: List of all tar file paths
+
+    Returns:
+        Updated submitted_tars set with partial jobs removed
+    """
+    if not output_dir.exists():
+        logging.warning(f"Output directory does not exist: {output_dir}")
+        return submitted_tars
+
+    # Create a mapping from tar basename to tar path for quick lookup
+    basename_to_path = {}
+    for tar_path in all_tars:
+        basename = get_tar_basename(tar_path)
+        basename_to_path[basename] = tar_path
+
+    partial_tars = set()
+
+    # Find .jsonl.partial files
+    for partial_file in output_dir.glob("*.jsonl.partial"):
+        # Extract the tar basename (remove .jsonl.partial)
+        tar_basename = partial_file.name.replace('.jsonl.partial', '')
+        if tar_basename in basename_to_path:
+            tar_path = basename_to_path[tar_basename]
+            if tar_path in submitted_tars:
+                partial_tars.add(tar_path)
+                logging.info(f"Found partial output: {partial_file.name} -> will retry {tar_basename} (partial file kept)")
+
+    # Remove partial tars from submitted set
+    updated_submitted = submitted_tars - partial_tars
+
+    num_removed = len(partial_tars)
+    if num_removed > 0:
+        logging.info(f"Removed {num_removed} partial jobs from submitted_tars")
+        logging.info(f"These jobs will be retried: {sorted([get_tar_basename(t) for t in partial_tars])}")
+    else:
+        logging.info("No partial jobs found")
+
+    return updated_submitted
+
+
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
@@ -373,6 +499,18 @@ def parse_args():
         help="Start processing from this index in the tarlist (0-based, default: 0)"
     )
 
+    parser.add_argument(
+        "--cleanup-failed",
+        action="store_true",
+        help="Clean up and retry failed jobs (0-byte .jsonl files and jobs with no output)"
+    )
+
+    parser.add_argument(
+        "--retry-partial",
+        action="store_true",
+        help="Retry partial jobs (.jsonl.partial files will be kept and processing will continue from them)"
+    )
+
     return parser.parse_args()
 
 
@@ -436,6 +574,26 @@ def main():
 
     # Load state
     submitted_tars = load_state(state_file)
+
+    # Run cleanup if requested
+    if args.cleanup_failed:
+        logging.info("=" * 80)
+        logging.info("Running cleanup for failed jobs...")
+        logging.info("=" * 80)
+        submitted_tars = cleanup_failed_jobs(output_dir, submitted_tars, all_tars)
+        save_state(state_file, submitted_tars)
+        logging.info(f"Updated state file: {state_file}")
+        logging.info("=" * 80)
+
+    # Run retry partial if requested
+    if args.retry_partial:
+        logging.info("=" * 80)
+        logging.info("Running retry for partial jobs...")
+        logging.info("=" * 80)
+        submitted_tars = retry_partial_jobs(output_dir, submitted_tars, all_tars)
+        save_state(state_file, submitted_tars)
+        logging.info(f"Updated state file: {state_file}")
+        logging.info("=" * 80)
 
     iteration = 0
 
