@@ -575,6 +575,33 @@ def main():
     # Load state
     submitted_tars = load_state(state_file)
 
+    # Check for dry-run mode and running/pending jobs if cleanup or retry is requested
+    if args.cleanup_failed or args.retry_partial:
+        # Check if dry-run mode is enabled
+        if args.dry_run:
+            logging.error("=" * 80)
+            logging.error("ERROR: Dry run mode is not supported with --cleanup-failed or --retry-partial")
+            logging.error("These operations modify the state file and must run in normal mode")
+            logging.error("=" * 80)
+            sys.exit(1)
+
+        # Check for running/pending jobs
+        num_jobs = get_num_jobs(username)
+        if num_jobs > 0:
+            logging.warning("=" * 80)
+            logging.warning(f"WARNING: There are currently {num_jobs} pending or running jobs")
+            if args.cleanup_failed:
+                logging.warning("Running --cleanup-failed will mark failed jobs for retry")
+            if args.retry_partial:
+                logging.warning("Running --retry-partial will mark partial jobs for retry")
+            logging.warning("=" * 80)
+
+            # Ask for confirmation
+            response = input("Do you want to continue? [y/N]: ").strip().lower()
+            if response not in ['y', 'yes']:
+                logging.info("Operation cancelled by user")
+                sys.exit(0)
+
     # Run cleanup if requested
     if args.cleanup_failed:
         logging.info("=" * 80)
