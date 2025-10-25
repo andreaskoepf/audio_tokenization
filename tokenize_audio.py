@@ -109,6 +109,10 @@ class PregressiveDecoder:
         self.max_tokens_per_fragment = max_tokens_per_fragment
         self.context_len = context_len
         self.tail_delay = tail_delay
+        self.reset()
+
+    def reset(self):
+        """Reset internal state for decoding a new audio file."""
         self.buffer = torch.empty(8, 0, dtype=torch.int32)
         self.first_block = True
 

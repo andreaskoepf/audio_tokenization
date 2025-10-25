@@ -169,6 +169,9 @@ def decode_command(args):
             if tokens_tensor.ndim == 1:
                 tokens_tensor = tokens_tensor.unsqueeze(0)
 
+            # Reset decoder state before decoding each file
+            decoder.reset()
+
             # Decode
             reconstructed = decoder.decode_piecewise(tokens_tensor)
 
