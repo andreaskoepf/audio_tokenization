@@ -37,7 +37,7 @@ def audio_metadata_to_dict(metadata: AudioStreamMetadata) -> dict:
 
 
 def load_audio_mono(
-    uri: str | PathLike | BinaryIO, sample_rate: int | None = None
+    uri: str | PathLike | BinaryIO, sample_rate: int | None = None, trim_zeros: bool = True,
 ) -> tuple[torch.Tensor, AudioStreamMetadata]:
     """
     Load audio file and convert to mono at the specified sample rate.
@@ -73,6 +73,17 @@ def load_audio_mono(
     max_value = wav.abs().max()
     if max_value.item() > 1.0:
         wav = wav / max_value
+
+    if trim_zeros:
+        # remove zero elements at the beginning and end
+        nonzero_indices = torch.nonzero(wav).squeeze()
+        if nonzero_indices.numel() > 0:
+            first_nonzero_idx = nonzero_indices[0].item()
+            last_nonzero_idx = nonzero_indices[-1].item()
+            wav = wav[first_nonzero_idx:last_nonzero_idx + 1]
+        elif wav.numel() > 0:
+            # all zeros
+            wav = wav[0:0]
 
     return wav, metadata
 
